@@ -1,6 +1,6 @@
 # CompassMem — BCH Mempool Monitor
 
-> Part of the [CashCompass](https://cashcompass.space) suite
+> Part of the [CashCompass](https://cashcompas-bch.vercel.app) suite
 
 Live Bitcoin Cash mempool visualizer. See what's happening inside the BCH network right now — pending transactions, fee rates, recent blocks, and network health. No API key. No build step. Pure HTML.
 
