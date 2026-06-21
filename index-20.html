@@ -1,0 +1,1255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CompassMem — BCH Mempool Monitor</title>
+<meta name="description" content="Live Bitcoin Cash mempool visualizer. Real-time fee rates, transaction flow, and block data. No key required.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --void: #080c08;
+    --panel: #111811;
+    --panel2: #162016;
+    --border: #1e2e1e;
+    --green-bright: #4dff91;
+    --green-mid: #00c26f;
+    --green-dim: #1a7a45;
+    --green-glow: rgba(77,255,145,0.12);
+    --green-glow2: rgba(77,255,145,0.06);
+    --text: #e8ede8;
+    --text-dim: #7a8f7a;
+    --text-muted: #4a5e4a;
+    --red: #ff4d6a;
+    --amber: #ffc94d;
+    --font-data: 'Space Grotesk', sans-serif;
+    --font-mono: 'Space Mono', monospace;
+    --font-body: 'Inter', sans-serif;
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--void);
+    color: var(--text);
+    font-family: var(--font-body);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── TICKER TAPE ── */
+  .ticker-wrap {
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    overflow: hidden;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    position: relative;
+  }
+  .ticker-wrap::before,
+  .ticker-wrap::after {
+    content: '';
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 60px;
+    z-index: 2;
+    pointer-events: none;
+  }
+  .ticker-wrap::before { left: 0; background: linear-gradient(to right, var(--panel), transparent); }
+  .ticker-wrap::after  { right: 0; background: linear-gradient(to left, var(--panel), transparent); }
+
+  .ticker-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--green-bright);
+    letter-spacing: 0.12em;
+    padding: 0 16px;
+    white-space: nowrap;
+    z-index: 3;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    height: 100%;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .ticker-track {
+    display: flex;
+    gap: 0;
+    animation: ticker-scroll 38s linear infinite;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .ticker-track:hover { animation-play-state: paused; }
+
+  @keyframes ticker-scroll {
+    0%   { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+  }
+
+  .ticker-item {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 0 20px;
+    color: var(--text-dim);
+    border-right: 1px solid var(--border);
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+  }
+  .ticker-item .tx-hash { color: var(--green-mid); }
+  .ticker-item .tx-amount { color: var(--text); font-weight: 600; }
+  .ticker-item .tx-fee { color: var(--text-muted); font-size: 10px; }
+
+  /* ── HEADER ── */
+  header {
+    padding: 28px 32px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+  }
+  .logo-icon {
+    width: 36px;
+    height: 36px;
+    background: var(--green-bright);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .logo-icon svg { width: 20px; height: 20px; }
+  .logo-name {
+    font-family: var(--font-data);
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -0.02em;
+  }
+  .logo-name span { color: var(--green-bright); }
+  .logo-sub {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-muted);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+
+  .header-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .pulse-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--green-bright);
+    box-shadow: 0 0 0 0 rgba(77,255,145,0.6);
+    animation: pulse-ring 2s ease-out infinite;
+    flex-shrink: 0;
+  }
+  @keyframes pulse-ring {
+    0%   { box-shadow: 0 0 0 0 rgba(77,255,145,0.6); }
+    70%  { box-shadow: 0 0 0 8px rgba(77,255,145,0); }
+    100% { box-shadow: 0 0 0 0 rgba(77,255,145,0); }
+  }
+
+  /* ── HERO STATS ── */
+  .hero {
+    padding: 36px 32px 0;
+  }
+  .hero-eyebrow {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.2em;
+    color: var(--green-mid);
+    text-transform: uppercase;
+    margin-bottom: 24px;
+  }
+
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 2px;
+  }
+
+  .stat-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 24px 20px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+  .stat-card:hover { border-color: var(--green-dim); }
+  .stat-card::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--green-bright);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.3s ease;
+  }
+  .stat-card:hover::after { transform: scaleX(1); }
+
+  .stat-card.highlight {
+    border-color: var(--green-dim);
+    background: var(--panel2);
+  }
+  .stat-card.highlight::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--green-glow2);
+  }
+
+  .stat-label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  .stat-value {
+    font-family: var(--font-data);
+    font-size: 38px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: var(--text);
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+  .stat-value.green { color: var(--green-bright); }
+  .stat-value.amber { color: var(--amber); }
+  .stat-unit {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .stat-delta {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    margin-top: 8px;
+  }
+  .delta-up { color: var(--green-mid); }
+  .delta-down { color: var(--red); }
+
+  /* ── FEE RECOMMENDATION BOX ── */
+  .fee-rec {
+    margin: 2px 0 0;
+    background: var(--panel);
+    border: 1px solid var(--green-dim);
+    padding: 20px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+    position: relative;
+    overflow: hidden;
+  }
+  .fee-rec::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--green-glow);
+  }
+  .fee-rec-label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    color: var(--green-mid);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .fee-rec-value {
+    font-family: var(--font-data);
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--green-bright);
+    letter-spacing: -0.02em;
+  }
+  .fee-rec-badges {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .fee-badge {
+    border: 1px solid var(--border);
+    padding: 8px 14px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    background: var(--panel2);
+    text-align: center;
+  }
+  .fee-badge strong {
+    display: block;
+    font-family: var(--font-data);
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 2px;
+  }
+  .fee-badge.fast strong { color: var(--green-bright); }
+  .fee-badge.medium strong { color: var(--amber); }
+  .fee-badge.slow strong { color: var(--text-dim); }
+
+  /* ── SECTION ── */
+  .section {
+    padding: 40px 32px 0;
+  }
+  .section-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-title {
+    font-family: var(--font-data);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .section-meta {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+  }
+
+  /* ── FEE DISTRIBUTION ── */
+  .fee-dist {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .fee-row {
+    display: grid;
+    grid-template-columns: 90px 1fr 60px;
+    align-items: center;
+    gap: 12px;
+  }
+  .fee-row-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    text-align: right;
+  }
+  .fee-bar-track {
+    height: 20px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+  .fee-bar-fill {
+    height: 100%;
+    background: var(--green-dim);
+    transition: width 1s ease;
+    position: relative;
+  }
+  .fee-bar-fill.tier-hot { background: var(--green-bright); }
+  .fee-bar-fill.tier-warm { background: var(--green-mid); }
+  .fee-bar-fill.tier-mid { background: var(--green-dim); }
+  .fee-bar-fill.tier-cool { background: #1a4a2a; }
+  .fee-row-count {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    text-align: right;
+  }
+
+  /* ── RECENT BLOCKS ── */
+  .blocks-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 2px;
+  }
+  .block-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 16px;
+    position: relative;
+    cursor: default;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .block-card:hover {
+    border-color: var(--green-dim);
+    background: var(--panel2);
+  }
+  .block-card.newest {
+    border-color: var(--green-dim);
+  }
+  .block-card.newest::before {
+    content: 'LATEST';
+    position: absolute;
+    top: 8px; right: 10px;
+    font-family: var(--font-mono);
+    font-size: 8px;
+    letter-spacing: 0.15em;
+    color: var(--green-bright);
+  }
+  .block-num {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+  .block-size {
+    font-family: var(--font-data);
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -0.02em;
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+  .block-txcount {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+  }
+  .block-fill-bar {
+    height: 3px;
+    background: var(--border);
+    border-radius: 0;
+    overflow: hidden;
+  }
+  .block-fill-inner {
+    height: 100%;
+    background: var(--green-bright);
+    transition: width 0.8s ease;
+  }
+  .block-time {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-muted);
+    margin-top: 8px;
+  }
+
+  /* ── TX FEED ── */
+  .tx-feed {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    max-height: 320px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--green-dim) var(--panel);
+  }
+  .tx-feed-row {
+    display: grid;
+    grid-template-columns: 1fr 110px 80px 70px;
+    gap: 12px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    align-items: center;
+    transition: background 0.15s;
+  }
+  .tx-feed-row:hover { background: var(--panel2); }
+  .tx-feed-row.tx-new {
+    animation: tx-flash 0.6s ease;
+  }
+  @keyframes tx-flash {
+    0%   { background: rgba(77,255,145,0.15); }
+    100% { background: transparent; }
+  }
+  .tx-feed-header {
+    background: var(--panel2);
+    border-bottom: 1px solid var(--border);
+  }
+  .tx-feed-header span {
+    font-size: 9px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+  .tx-hash-short { color: var(--green-mid); }
+  .tx-bch { color: var(--text); font-weight: 700; }
+  .tx-fee-rate { color: var(--text-dim); }
+  .tx-size { color: var(--text-muted); }
+
+  /* ── NETWORK HEALTH ── */
+  .health-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 2px;
+  }
+  .health-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 20px;
+  }
+  .health-label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .health-val {
+    font-family: var(--font-data);
+    font-size: 24px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.02em;
+  }
+  .health-sub {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  /* ── FOOTER ── */
+  footer {
+    margin-top: 60px;
+    padding: 32px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 24px;
+  }
+  .footer-brand {
+    font-family: var(--font-data);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-dim);
+  }
+  .footer-brand span { color: var(--green-bright); }
+  .footer-links {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .footer-links a {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    text-decoration: none;
+    letter-spacing: 0.1em;
+    transition: color 0.15s;
+  }
+  .footer-links a:hover { color: var(--green-bright); }
+
+  .donate-row {
+    width: 100%;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 16px 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .donate-label {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    color: var(--green-mid);
+    text-transform: uppercase;
+    flex-shrink: 0;
+  }
+  .donate-addr {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    word-break: break-all;
+    flex: 1;
+  }
+  .donate-copy {
+    background: none;
+    border: 1px solid var(--green-dim);
+    color: var(--green-bright);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 6px 12px;
+    cursor: pointer;
+    letter-spacing: 0.1em;
+    transition: background 0.15s, color 0.15s;
+    flex-shrink: 0;
+  }
+  .donate-copy:hover { background: var(--green-bright); color: var(--void); }
+  .donate-copy.copied { background: var(--green-bright); color: var(--void); }
+
+  /* ── LOADING ── */
+  .loading-overlay {
+    position: fixed;
+    inset: 0;
+    background: var(--void);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    z-index: 999;
+    transition: opacity 0.5s ease;
+  }
+  .loading-overlay.hidden { opacity: 0; pointer-events: none; }
+  .loading-logo {
+    font-family: var(--font-data);
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .loading-logo span { color: var(--green-bright); }
+  .loading-bar-wrap {
+    width: 200px;
+    height: 2px;
+    background: var(--panel);
+  }
+  .loading-bar-inner {
+    height: 100%;
+    background: var(--green-bright);
+    animation: load-prog 1.8s ease forwards;
+  }
+  @keyframes load-prog {
+    0%   { width: 0%; }
+    100% { width: 100%; }
+  }
+  .loading-status {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    letter-spacing: 0.1em;
+  }
+
+  /* ── ERROR BANNER ── */
+  .error-banner {
+    background: rgba(255,77,106,0.08);
+    border: 1px solid rgba(255,77,106,0.25);
+    padding: 10px 16px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--red);
+    margin: 16px 32px 0;
+    display: none;
+  }
+  .error-banner.visible { display: block; }
+
+  /* ── LAST UPDATE ── */
+  #last-update {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    margin: 12px 32px 0;
+  }
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 600px) {
+    header, .hero, .section, footer { padding-left: 16px; padding-right: 16px; }
+    .stat-value { font-size: 28px; }
+    .tx-feed-row { grid-template-columns: 1fr 90px 65px; }
+    .tx-feed-row .tx-size { display: none; }
+    .error-banner { margin-left: 16px; margin-right: 16px; }
+    #last-update { margin-left: 16px; margin-right: 16px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ticker-track { animation: none; }
+    .pulse-dot { animation: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Loading screen -->
+<div class="loading-overlay" id="loading">
+  <div class="loading-logo">Compass<span>Mem</span></div>
+  <div class="loading-bar-wrap"><div class="loading-bar-inner"></div></div>
+  <div class="loading-status" id="load-status">CONNECTING TO BCH NETWORK...</div>
+</div>
+
+<!-- Ticker tape -->
+<div class="ticker-wrap">
+  <div class="ticker-label">⬡ LIVE TX</div>
+  <div class="ticker-track" id="ticker-track">
+    <span class="ticker-item"><span class="tx-hash">a3f9…2c1d</span><span class="tx-amount">0.042 BCH</span><span class="tx-fee">1.0 sat/B</span></span>
+    <span class="ticker-item"><span class="tx-hash">7b12…9e4a</span><span class="tx-amount">2.817 BCH</span><span class="tx-fee">1.0 sat/B</span></span>
+    <span class="ticker-item"><span class="tx-hash">c55f…03d2</span><span class="tx-amount">0.003 BCH</span><span class="tx-fee">1.0 sat/B</span></span>
+    <span class="ticker-item"><span class="tx-hash">e89a…71bc</span><span class="tx-amount">14.2 BCH</span><span class="tx-fee">1.0 sat/B</span></span>
+    <span class="ticker-item"><span class="tx-hash">1d47…a8f3</span><span class="tx-amount">0.551 BCH</span><span class="tx-fee">1.0 sat/B</span></span>
+    <span class="ticker-item"><span class="tx-hash">f201…cc89</span><span class="tx-amount">0.100 BCH</span><span class="tx-fee">1.0 sat/B</span></span>
+    <span class="ticker-item"><span class="tx-hash">8e3b…54d1</span><span class="tx-amount">3.77 BCH</span><span class="tx-fee">1.0 sat/B</span></span>
+    <span class="ticker-item"><span class="tx-hash">a3f9…2c1d</span><span class="tx-amount">0.042 BCH</span><span class="tx-fee">1.0 sat/B</span></span>
+    <span class="ticker-item"><span class="tx-hash">7b12…9e4a</span><span class="tx-amount">2.817 BCH</span><span class="tx-fee">1.0 sat/B</span></span>
+    <span class="ticker-item"><span class="tx-hash">c55f…03d2</span><span class="tx-amount">0.003 BCH</span><span class="tx-fee">1.0 sat/B</span></span>
+    <span class="ticker-item"><span class="tx-hash">e89a…71bc</span><span class="tx-amount">14.2 BCH</span><span class="tx-fee">1.0 sat/B</span></span>
+    <span class="ticker-item"><span class="tx-hash">1d47…a8f3</span><span class="tx-amount">0.551 BCH</span><span class="tx-fee">1.0 sat/B</span></span>
+    <span class="ticker-item"><span class="tx-hash">f201…cc89</span><span class="tx-amount">0.100 BCH</span><span class="tx-fee">1.0 sat/B</span></span>
+    <span class="ticker-item"><span class="tx-hash">8e3b…54d1</span><span class="tx-amount">3.77 BCH</span><span class="tx-fee">1.0 sat/B</span></span>
+  </div>
+</div>
+
+<!-- Header -->
+<header>
+  <a href="#" class="logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 20 20" fill="none">
+        <circle cx="10" cy="10" r="8" stroke="#080c08" stroke-width="1.5"/>
+        <path d="M10 4v12M6 7h5.5c1.1 0 2 .9 2 2s-.9 2-2 2H6M6 11h5.5c1.1 0 2 .9 2 2s-.9 2-2 2H6" stroke="#080c08" stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div>
+      <div class="logo-name">Compass<span>Mem</span></div>
+      <div class="logo-sub">BCH Mempool Monitor</div>
+    </div>
+  </a>
+  <div class="header-status">
+    <div class="pulse-dot" id="status-dot"></div>
+    <span id="status-text">LIVE</span>
+    <span style="color:var(--border)">|</span>
+    <span>Haskoin Store API</span>
+  </div>
+</header>
+
+<!-- Error banner -->
+<div class="error-banner" id="error-banner">
+  ⚠ Could not reach Haskoin API. Retrying every 30s. Data shown may be stale.
+</div>
+
+<p id="last-update"></p>
+
+<!-- Hero Stats -->
+<div class="hero">
+  <div class="hero-eyebrow">⬡ Live Mempool — Bitcoin Cash</div>
+  <div class="stat-grid" id="stat-grid">
+    <div class="stat-card">
+      <div class="stat-label">Pending Transactions</div>
+      <div class="stat-value" id="stat-tx-count">—</div>
+      <div class="stat-unit">in mempool</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Mempool Size</div>
+      <div class="stat-value" id="stat-mem-size">—</div>
+      <div class="stat-unit" id="stat-mem-unit">KB</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Avg Fee Rate</div>
+      <div class="stat-value green" id="stat-avg-fee">—</div>
+      <div class="stat-unit">sat / byte</div>
+    </div>
+    <div class="stat-card highlight">
+      <div class="stat-label">Best Block Height</div>
+      <div class="stat-value" id="stat-height">—</div>
+      <div class="stat-unit">confirmed blocks</div>
+    </div>
+  </div>
+
+  <!-- Fee recommendation -->
+  <div class="fee-rec">
+    <div>
+      <div class="fee-rec-label">Recommended Next-Block Fee</div>
+      <div class="fee-rec-value" id="rec-fee">1.0 sat/byte</div>
+      <div class="stat-unit" style="position:relative;margin-top:4px;">BCH fees are almost always 1 sat/byte — this is BCH.</div>
+    </div>
+    <div class="fee-rec-badges">
+      <div class="fee-badge fast">
+        <strong id="badge-fast">1.0</strong>
+        sat/B · Fast
+      </div>
+      <div class="fee-badge medium">
+        <strong id="badge-med">1.0</strong>
+        sat/B · Standard
+      </div>
+      <div class="fee-badge slow">
+        <strong id="badge-slow">1.0</strong>
+        sat/B · Economy
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Fee Distribution -->
+<div class="section">
+  <div class="section-header">
+    <div class="section-title">Fee Rate Distribution</div>
+    <div class="section-meta" id="fee-dist-meta">sat/byte across mempool txs</div>
+  </div>
+  <div class="fee-dist" id="fee-dist">
+    <div class="fee-row">
+      <div class="fee-row-label">≥ 2.0 sat/B</div>
+      <div class="fee-bar-track"><div class="fee-bar-fill tier-hot" id="bar-2plus" style="width:0%"></div></div>
+      <div class="fee-row-count" id="cnt-2plus">—</div>
+    </div>
+    <div class="fee-row">
+      <div class="fee-row-label">1.5–2.0</div>
+      <div class="fee-bar-track"><div class="fee-bar-fill tier-warm" id="bar-15" style="width:0%"></div></div>
+      <div class="fee-row-count" id="cnt-15">—</div>
+    </div>
+    <div class="fee-row">
+      <div class="fee-row-label">1.0–1.5</div>
+      <div class="fee-bar-track"><div class="fee-bar-fill tier-mid" id="bar-10" style="width:0%"></div></div>
+      <div class="fee-row-count" id="cnt-10">—</div>
+    </div>
+    <div class="fee-row">
+      <div class="fee-row-label">&lt; 1.0</div>
+      <div class="fee-bar-track"><div class="fee-bar-fill tier-cool" id="bar-sub" style="width:0%"></div></div>
+      <div class="fee-row-count" id="cnt-sub">—</div>
+    </div>
+  </div>
+</div>
+
+<!-- Recent Blocks -->
+<div class="section">
+  <div class="section-header">
+    <div class="section-title">Recent Blocks</div>
+    <div class="section-meta">Last 6 confirmed blocks</div>
+  </div>
+  <div class="blocks-strip" id="blocks-strip">
+    <!-- Filled by JS -->
+  </div>
+</div>
+
+<!-- Live TX Feed -->
+<div class="section" style="padding-bottom: 0;">
+  <div class="section-header">
+    <div class="section-title">Mempool Transaction Feed</div>
+    <div class="section-meta" id="feed-meta">Latest pending txs</div>
+  </div>
+  <div class="tx-feed">
+    <div class="tx-feed-row tx-feed-header">
+      <span>TX HASH</span>
+      <span>AMOUNT (BCH)</span>
+      <span>FEE RATE</span>
+      <span>SIZE</span>
+    </div>
+    <div id="tx-feed-body">
+      <!-- Filled by JS -->
+    </div>
+  </div>
+</div>
+
+<!-- Network Health -->
+<div class="section">
+  <div class="section-header">
+    <div class="section-title">Network Snapshot</div>
+    <div class="section-meta">Derived from latest block</div>
+  </div>
+  <div class="health-grid">
+    <div class="health-card">
+      <div class="health-label">Block Time (avg, last 6)</div>
+      <div class="health-val" id="h-blocktime">—</div>
+      <div class="health-sub">target: ~600s</div>
+    </div>
+    <div class="health-card">
+      <div class="health-label">Avg Block Size</div>
+      <div class="health-val" id="h-blocksize">—</div>
+      <div class="health-sub">max: 32 MB</div>
+    </div>
+    <div class="health-card">
+      <div class="health-label">Avg Txs / Block</div>
+      <div class="health-val" id="h-txperblock">—</div>
+      <div class="health-sub">last 6 blocks</div>
+    </div>
+    <div class="health-card">
+      <div class="health-label">BCH Node</div>
+      <div class="health-val" style="color:var(--green-bright);font-size:16px">Haskoin</div>
+      <div class="health-sub">api.haskoin.com/bch</div>
+    </div>
+  </div>
+</div>
+
+<!-- Footer -->
+<footer>
+  <div>
+    <div class="footer-brand">Compass<span>Mem</span> — part of the <span>CashCompass</span> suite</div>
+    <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-muted);margin-top:6px;">
+      Built with Haskoin Store API · No key required · Open source
+    </div>
+  </div>
+  <div class="footer-links">
+    <a href="https://cashcompass.space" target="_blank">CashCompass</a>
+    <a href="https://compasspay.cash" target="_blank">CompassPay</a>
+    <a href="https://stableshift.cash" target="_blank">StableShift</a>
+    <a href="https://compass-whale.vercel.app" target="_blank">CompassWhale</a>
+    <a href="https://github.com/alberdioni8406" target="_blank">GitHub</a>
+  </div>
+  <div class="donate-row">
+    <div class="donate-label">Support</div>
+    <div class="donate-addr" id="donate-addr">bitcoincash:qrtv37u522gz8a5lezfqk5vukly93cu7gc8tn09040</div>
+    <button class="donate-copy" id="donate-copy-btn" onclick="copyDonate()">COPY</button>
+  </div>
+</footer>
+
+<script>
+// ── CONFIG ──
+const HASKOIN = 'https://api.haskoin.com/bch';
+const SATOSHI = 1e8;
+const REFRESH_MS = 30000;
+const DONATE = 'bitcoincash:qrtv37u522gz8a5lezfqk5vukly93cu7gc8tn09040';
+
+// ── STATE ──
+let state = {
+  blocks: [],
+  mempoolTxs: [],
+  bestBlock: null,
+  loadedOnce: false
+};
+
+// ── UTILS ──
+function fmt(n, d = 2) {
+  if (n == null || isNaN(n)) return '—';
+  return Number(n).toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d });
+}
+function fmtInt(n) {
+  if (n == null || isNaN(n)) return '—';
+  return Math.round(n).toLocaleString('en-US');
+}
+function shortHash(h) {
+  if (!h || h.length < 12) return h || '—';
+  return h.slice(0, 6) + '…' + h.slice(-4);
+}
+function timeAgo(ts) {
+  const diff = Math.floor(Date.now() / 1000) - ts;
+  if (diff < 60) return diff + 's ago';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  return Math.floor(diff / 3600) + 'h ago';
+}
+function byteLabel(bytes) {
+  if (bytes >= 1_000_000) return (bytes / 1_000_000).toFixed(2) + ' MB';
+  if (bytes >= 1_000)     return (bytes / 1_000).toFixed(1) + ' KB';
+  return bytes + ' B';
+}
+
+// ── COPY DONATE ──
+function copyDonate() {
+  navigator.clipboard.writeText(DONATE).then(() => {
+    const btn = document.getElementById('donate-copy-btn');
+    btn.textContent = 'COPIED!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'COPY'; btn.classList.remove('copied'); }, 2000);
+  });
+}
+
+// ── API HELPERS ──
+async function apiFetch(path) {
+  const r = await fetch(HASKOIN + path, { headers: { 'Accept': 'application/json' } });
+  if (!r.ok) throw new Error(`HTTP ${r.status}: ${path}`);
+  return r.json();
+}
+
+// ── FETCH BEST BLOCK ──
+async function fetchBestBlock() {
+  const best = await apiFetch('/block/best?notx=true');
+  return best;
+}
+
+// ── FETCH RECENT BLOCKS ──
+async function fetchRecentBlocks(startHash, count = 6) {
+  const blocks = [];
+  let hash = startHash;
+  for (let i = 0; i < count; i++) {
+    try {
+      const b = await apiFetch(`/block/${hash}?notx=false`);
+      blocks.push(b);
+      hash = b.previousblockhash || b.prev;
+      if (!hash) break;
+    } catch(e) { break; }
+  }
+  return blocks;
+}
+
+// ── FETCH MEMPOOL TXS ──
+async function fetchMempoolTxs() {
+  // Get mempool tx IDs (first page, limit 50)
+  let txids = [];
+  try {
+    const mempoolData = await apiFetch('/mempool/transactions?limit=50&offset=0');
+    // mempoolData may be array of txids or objects
+    if (Array.isArray(mempoolData)) {
+      txids = mempoolData.slice(0, 50).map(t => typeof t === 'string' ? t : (t.txid || t.txHash));
+    }
+  } catch(e) {
+    // fallback: try /mempool endpoint
+    try {
+      const alt = await apiFetch('/mempool?limit=50');
+      if (Array.isArray(alt)) {
+        txids = alt.slice(0, 50).map(t => typeof t === 'string' ? t : (t.txid || t.hash));
+      }
+    } catch(e2) { /* silent */ }
+  }
+  return txids.filter(Boolean);
+}
+
+// ── FETCH TX DETAILS ──
+async function fetchTxDetails(txids) {
+  const details = [];
+  const batch = txids.slice(0, 20);
+  for (const txid of batch) {
+    try {
+      const tx = await apiFetch(`/transaction/${txid}`);
+      details.push(tx);
+    } catch(e) { /* skip */ }
+  }
+  return details;
+}
+
+// ── PARSE TX ──
+function parseTx(tx) {
+  // Outputs sum = value in satoshis
+  let outVal = 0;
+  if (tx.outputs) tx.outputs.forEach(o => outVal += (o.value || 0));
+  else if (tx.vout) tx.vout.forEach(o => outVal += Math.round((o.value || 0) * SATOSHI));
+
+  const fees = tx.fee || tx.fees || 0;
+  const size  = tx.size || tx.weight || tx.vsize || 250;
+  const feeRate = size > 0 ? (fees / size) : 1.0;
+
+  return {
+    txid: tx.txid || tx.hash || '',
+    bch:  outVal / SATOSHI,
+    fee:  fees,
+    size: size,
+    feeRate: Math.max(feeRate, 0.001)
+  };
+}
+
+// ── RENDER STATS ──
+function renderStats(txDetails, bestBlock) {
+  const count = txDetails.length;
+  const totalSize = txDetails.reduce((a, t) => a + t.size, 0);
+  const avgFee = count > 0
+    ? txDetails.reduce((a, t) => a + t.feeRate, 0) / count
+    : 1.0;
+
+  document.getElementById('stat-tx-count').textContent = count > 0 ? fmtInt(count) + '+' : '—';
+
+  const sizeBytes = totalSize;
+  document.getElementById('stat-mem-size').textContent =
+    sizeBytes >= 1000 ? fmt(sizeBytes / 1000, 1) : sizeBytes.toString();
+  document.getElementById('stat-mem-unit').textContent =
+    sizeBytes >= 1000 ? 'KB' : 'bytes';
+
+  document.getElementById('stat-avg-fee').textContent = fmt(avgFee, 2);
+
+  if (bestBlock) {
+    document.getElementById('stat-height').textContent = fmtInt(bestBlock.height);
+  }
+
+  // Fee recommendation — BCH is almost always 1 sat/byte
+  const recFee = Math.max(1.0, Math.ceil(avgFee * 10) / 10);
+  document.getElementById('rec-fee').textContent = fmt(recFee, 1) + ' sat/byte';
+  document.getElementById('badge-fast').textContent = fmt(recFee + 0.5, 1);
+  document.getElementById('badge-med').textContent  = fmt(recFee, 1);
+  document.getElementById('badge-slow').textContent = fmt(Math.max(1.0, recFee - 0.5), 1);
+}
+
+// ── RENDER FEE DIST ──
+function renderFeeDist(txDetails) {
+  if (!txDetails.length) return;
+  const buckets = { b2plus: 0, b15: 0, b10: 0, bsub: 0 };
+  txDetails.forEach(t => {
+    const fr = t.feeRate;
+    if (fr >= 2.0)       buckets.b2plus++;
+    else if (fr >= 1.5)  buckets.b15++;
+    else if (fr >= 1.0)  buckets.b10++;
+    else                 buckets.bsub++;
+  });
+  const total = txDetails.length;
+  const pct = n => total > 0 ? ((n / total) * 100).toFixed(1) + '%' : '0%';
+
+  document.getElementById('bar-2plus').style.width = pct(buckets.b2plus);
+  document.getElementById('bar-15').style.width    = pct(buckets.b15);
+  document.getElementById('bar-10').style.width    = pct(buckets.b10);
+  document.getElementById('bar-sub').style.width   = pct(buckets.bsub);
+
+  document.getElementById('cnt-2plus').textContent = buckets.b2plus;
+  document.getElementById('cnt-15').textContent    = buckets.b15;
+  document.getElementById('cnt-10').textContent    = buckets.b10;
+  document.getElementById('cnt-sub').textContent   = buckets.bsub;
+
+  document.getElementById('fee-dist-meta').textContent =
+    `${total} txs sampled · sat/byte distribution`;
+}
+
+// ── RENDER BLOCKS ──
+function renderBlocks(blocks) {
+  const container = document.getElementById('blocks-strip');
+  container.innerHTML = '';
+  blocks.forEach((b, i) => {
+    const size = b.size || 0;
+    const txCount = b.txcount || (b.tx ? b.tx.length : 0);
+    const ts = b.time || b.mediantime || 0;
+    const fillPct = Math.min(100, (size / (32 * 1024 * 1024)) * 100);
+
+    const card = document.createElement('div');
+    card.className = 'block-card' + (i === 0 ? ' newest' : '');
+    card.innerHTML = `
+      <div class="block-num"># ${fmtInt(b.height)}</div>
+      <div class="block-size">${byteLabel(size)}</div>
+      <div class="block-txcount">${fmtInt(txCount)} transactions</div>
+      <div class="block-fill-bar">
+        <div class="block-fill-inner" style="width:${fillPct.toFixed(2)}%"></div>
+      </div>
+      <div class="block-time">${ts ? timeAgo(ts) : '—'}</div>
+    `;
+    container.appendChild(card);
+  });
+}
+
+// ── RENDER TX FEED ──
+function renderTxFeed(txDetails) {
+  const body = document.getElementById('tx-feed-body');
+  body.innerHTML = '';
+  const rows = txDetails.slice(0, 30);
+  rows.forEach((t, i) => {
+    const row = document.createElement('div');
+    row.className = 'tx-feed-row' + (i < 3 ? ' tx-new' : '');
+    row.innerHTML = `
+      <span class="tx-hash-short">${shortHash(t.txid)}</span>
+      <span class="tx-bch">${fmt(t.bch, 4)}</span>
+      <span class="tx-fee-rate">${fmt(t.feeRate, 2)} s/B</span>
+      <span class="tx-size">${t.size}B</span>
+    `;
+    body.appendChild(row);
+  });
+  document.getElementById('feed-meta').textContent = `${rows.length} txs · refreshes every 30s`;
+}
+
+// ── UPDATE TICKER ──
+function updateTicker(txDetails) {
+  if (!txDetails.length) return;
+  const items = txDetails.slice(0, 14).map(t =>
+    `<span class="ticker-item"><span class="tx-hash">${shortHash(t.txid)}</span><span class="tx-amount">${fmt(t.bch, 4)} BCH</span><span class="tx-fee">${fmt(t.feeRate,2)} sat/B</span></span>`
+  );
+  const doubled = [...items, ...items].join('');
+  document.getElementById('ticker-track').innerHTML = doubled;
+}
+
+// ── RENDER NETWORK HEALTH ──
+function renderHealth(blocks) {
+  if (blocks.length < 2) return;
+  // Block time: average gap between last 6 blocks
+  let totalTime = 0, count = 0;
+  for (let i = 0; i < blocks.length - 1; i++) {
+    const diff = (blocks[i].time || 0) - (blocks[i + 1].time || 0);
+    if (diff > 0) { totalTime += diff; count++; }
+  }
+  const avgTime = count > 0 ? Math.round(totalTime / count) : null;
+  document.getElementById('h-blocktime').textContent = avgTime ? avgTime + 's' : '—';
+
+  const avgSize = blocks.reduce((a, b) => a + (b.size || 0), 0) / blocks.length;
+  document.getElementById('h-blocksize').textContent = byteLabel(Math.round(avgSize));
+
+  const avgTx = blocks.reduce((a, b) => a + (b.txcount || 0), 0) / blocks.length;
+  document.getElementById('h-txperblock').textContent = fmtInt(Math.round(avgTx));
+}
+
+// ── STATUS ──
+function setStatus(ok) {
+  const dot  = document.getElementById('status-dot');
+  const text = document.getElementById('status-text');
+  const err  = document.getElementById('error-banner');
+  if (ok) {
+    dot.style.background = 'var(--green-bright)';
+    text.textContent = 'LIVE';
+    err.classList.remove('visible');
+  } else {
+    dot.style.background = 'var(--red)';
+    text.textContent = 'ERROR';
+    err.classList.add('visible');
+  }
+}
+
+function setLastUpdate() {
+  const el = document.getElementById('last-update');
+  el.textContent = 'Last updated: ' + new Date().toLocaleTimeString();
+}
+
+// ── MAIN FETCH CYCLE ──
+async function refresh() {
+  document.getElementById('load-status').textContent = 'FETCHING BEST BLOCK...';
+  try {
+    // 1. Best block
+    const best = await fetchBestBlock();
+    state.bestBlock = best;
+
+    document.getElementById('load-status').textContent = 'LOADING RECENT BLOCKS...';
+
+    // 2. Recent blocks
+    const startHash = best.id || best.hash;
+    const blocks = await fetchRecentBlocks(startHash, 6);
+    state.blocks = blocks;
+
+    document.getElementById('load-status').textContent = 'SCANNING MEMPOOL...';
+
+    // 3. Mempool txids
+    const txids = await fetchMempoolTxs();
+
+    document.getElementById('load-status').textContent = 'FETCHING TX DETAILS...';
+
+    // 4. TX details (up to 20 for speed)
+    let txDetails = [];
+    if (txids.length > 0) {
+      const raw = await fetchTxDetails(txids.slice(0, 20));
+      txDetails = raw.map(parseTx).filter(t => t.txid);
+    }
+    state.mempoolTxs = txDetails;
+
+    // 5. Render everything
+    renderStats(txDetails, best);
+    renderFeeDist(txDetails);
+    renderBlocks(blocks);
+    renderTxFeed(txDetails);
+    renderHealth(blocks);
+    if (txDetails.length > 0) updateTicker(txDetails);
+
+    setStatus(true);
+    setLastUpdate();
+
+    // Hide loader on first success
+    if (!state.loadedOnce) {
+      state.loadedOnce = true;
+      const overlay = document.getElementById('loading');
+      overlay.classList.add('hidden');
+      setTimeout(() => overlay.remove(), 600);
+    }
+
+  } catch(err) {
+    console.error('CompassMem fetch error:', err);
+    setStatus(false);
+    if (!state.loadedOnce) {
+      document.getElementById('load-status').textContent = 'RETRYING...';
+    }
+  }
+}
+
+// ── INIT ──
+refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>
