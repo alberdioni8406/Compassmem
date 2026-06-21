@@ -968,12 +968,16 @@ async function fetchBestBlock() {
 }
 
 // ── FETCH RECENT BLOCKS ──
+// notx=true skips embedding all tx hashes → much faster response
+// Haskoin block object: { hash, height, size, txs (count), time, previousblockhash, ... }
 async function fetchRecentBlocks(startHash, count = 6) {
   const blocks = [];
   let hash = startHash;
   for (let i = 0; i < count; i++) {
     try {
-      const b = await apiFetch(`/block/${hash}?notx=false`);
+      const b = await apiFetch(`/block/${hash}?notx=true`);
+      // Normalise tx count — Haskoin uses `txs` (integer) when notx=true
+      b._txcount = b.txcount || b.txs || (Array.isArray(b.tx) ? b.tx.length : 0);
       blocks.push(b);
       hash = b.previousblockhash || b.prev;
       if (!hash) break;
@@ -983,38 +987,46 @@ async function fetchRecentBlocks(startHash, count = 6) {
 }
 
 // ── FETCH MEMPOOL TXS ──
+// Haskoin correct endpoint: GET /mempool?limit=N returns array of txid strings
 async function fetchMempoolTxs() {
-  // Get mempool tx IDs (first page, limit 50)
   let txids = [];
   try {
-    const mempoolData = await apiFetch('/mempool/transactions?limit=50&offset=0');
-    // mempoolData may be array of txids or objects
-    if (Array.isArray(mempoolData)) {
-      txids = mempoolData.slice(0, 50).map(t => typeof t === 'string' ? t : (t.txid || t.txHash));
+    const data = await apiFetch('/mempool?limit=50&offset=0');
+    if (Array.isArray(data)) {
+      txids = data.map(t => (typeof t === 'string' ? t : (t.txid || t.hash || null))).filter(Boolean);
     }
   } catch(e) {
-    // fallback: try /mempool endpoint
-    try {
-      const alt = await apiFetch('/mempool?limit=50');
-      if (Array.isArray(alt)) {
-        txids = alt.slice(0, 50).map(t => typeof t === 'string' ? t : (t.txid || t.hash));
-      }
-    } catch(e2) { /* silent */ }
+    console.warn('fetchMempoolTxs failed:', e.message);
   }
-  return txids.filter(Boolean);
+  return txids;
 }
 
-// ── FETCH TX DETAILS ──
+// ── FETCH TX DETAILS (batch POST) ──
+// Haskoin supports POST /transactions with JSON array of txids → array of tx objects
 async function fetchTxDetails(txids) {
-  const details = [];
+  if (!txids.length) return [];
   const batch = txids.slice(0, 20);
-  for (const txid of batch) {
-    try {
-      const tx = await apiFetch(`/transaction/${txid}`);
-      details.push(tx);
-    } catch(e) { /* skip */ }
+  try {
+    const r = await fetch(HASKOIN + '/transactions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(batch)
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    return Array.isArray(data) ? data : [];
+  } catch(e) {
+    // Fallback: fetch individually but only first 8 to avoid timeout
+    console.warn('Batch TX fetch failed, trying individual:', e.message);
+    const details = [];
+    for (const txid of batch.slice(0, 8)) {
+      try {
+        const tx = await apiFetch(`/transaction/${txid}`);
+        details.push(tx);
+      } catch(err) { /* skip */ }
+    }
+    return details;
   }
-  return details;
 }
 
 // ── PARSE TX ──
@@ -1045,7 +1057,7 @@ function renderStats(txDetails, bestBlock) {
     ? txDetails.reduce((a, t) => a + t.feeRate, 0) / count
     : 1.0;
 
-  document.getElementById('stat-tx-count').textContent = count > 0 ? fmtInt(count) + '+' : '—';
+  document.getElementById('stat-tx-count').textContent = count > 0 ? fmtInt(count) + '+' : '0';
 
   const sizeBytes = totalSize;
   document.getElementById('stat-mem-size').textContent =
@@ -1101,7 +1113,7 @@ function renderBlocks(blocks) {
   container.innerHTML = '';
   blocks.forEach((b, i) => {
     const size = b.size || 0;
-    const txCount = b.txcount || (b.tx ? b.tx.length : 0);
+    const txCount = b._txcount || 0;
     const ts = b.time || b.mediantime || 0;
     const fillPct = Math.min(100, (size / (32 * 1024 * 1024)) * 100);
 
@@ -1124,6 +1136,15 @@ function renderBlocks(blocks) {
 function renderTxFeed(txDetails) {
   const body = document.getElementById('tx-feed-body');
   body.innerHTML = '';
+  if (!txDetails.length) {
+    const empty = document.createElement('div');
+    empty.className = 'tx-feed-row';
+    empty.style.cssText = 'grid-template-columns:1fr;color:var(--text-muted);font-family:var(--font-mono);font-size:11px;';
+    empty.textContent = 'Mempool is near-empty — BCH blocks clear transactions quickly.';
+    body.appendChild(empty);
+    document.getElementById('feed-meta').textContent = '0 pending txs · refreshes every 30s';
+    return;
+  }
   const rows = txDetails.slice(0, 30);
   rows.forEach((t, i) => {
     const row = document.createElement('div');
@@ -1164,7 +1185,7 @@ function renderHealth(blocks) {
   const avgSize = blocks.reduce((a, b) => a + (b.size || 0), 0) / blocks.length;
   document.getElementById('h-blocksize').textContent = byteLabel(Math.round(avgSize));
 
-  const avgTx = blocks.reduce((a, b) => a + (b.txcount || 0), 0) / blocks.length;
+  const avgTx = blocks.reduce((a, b) => a + (b._txcount || 0), 0) / blocks.length;
   document.getElementById('h-txperblock').textContent = fmtInt(Math.round(avgTx));
 }
 
@@ -1199,8 +1220,8 @@ async function refresh() {
 
     document.getElementById('load-status').textContent = 'LOADING RECENT BLOCKS...';
 
-    // 2. Recent blocks
-    const startHash = best.id || best.hash;
+    // 2. Recent blocks — Haskoin returns hash field as "hash"
+    const startHash = best.hash || best.id;
     const blocks = await fetchRecentBlocks(startHash, 6);
     state.blocks = blocks;
 
@@ -1211,15 +1232,15 @@ async function refresh() {
 
     document.getElementById('load-status').textContent = 'FETCHING TX DETAILS...';
 
-    // 4. TX details (up to 20 for speed)
+    // 4. TX details — batch POST is fast; graceful if mempool is empty (normal on BCH)
     let txDetails = [];
     if (txids.length > 0) {
-      const raw = await fetchTxDetails(txids.slice(0, 20));
+      const raw = await fetchTxDetails(txids);
       txDetails = raw.map(parseTx).filter(t => t.txid);
     }
     state.mempoolTxs = txDetails;
 
-    // 5. Render everything
+    // 5. Render everything — blocks always render; mempool sections show empty state if no txs
     renderStats(txDetails, best);
     renderFeeDist(txDetails);
     renderBlocks(blocks);
