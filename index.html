@@ -682,39 +682,6 @@
     .pulse-dot { animation: none; }
   }
 
-  /* ── DEBUG PANEL ── */
-  #debug-panel {
-    position: fixed;
-    bottom: 0; left: 0; right: 0;
-    background: #0a0a0a;
-    border-top: 2px solid #4dff91;
-    max-height: 220px;
-    overflow-y: auto;
-    z-index: 9999;
-    font-family: 'Space Mono', monospace;
-    font-size: 11px;
-    padding: 8px 12px;
-  }
-  #debug-panel .dp-title {
-    color: #4dff91;
-    font-size: 10px;
-    letter-spacing: 0.15em;
-    margin-bottom: 6px;
-    display: flex;
-    justify-content: space-between;
-  }
-  #debug-panel .dp-close {
-    color: #ff4d6a;
-    cursor: pointer;
-    font-size: 12px;
-  }
-  #debug-panel .dp-line {
-    color: #7a9e7a;
-    border-bottom: 1px solid #1a2e1a;
-    padding: 3px 0;
-    word-break: break-all;
-  }
-  #debug-panel .dp-line.highlight { color: #4dff91; }
 
 </style>
 </head>
@@ -1146,7 +1113,7 @@ function renderBlocks(blocks) {
   container.innerHTML = '';
   blocks.forEach((b, i) => {
     const size = b.size || 0;
-    const txCount = b._txcount || 0;
+    const txCount = Array.isArray(b.tx) ? b.tx.length : (typeof b.txs === 'number' ? b.txs : 0);
     const ts = b.time || b.mediantime || 0;
     const fillPct = Math.min(100, (size / (32 * 1024 * 1024)) * 100);
 
@@ -1206,36 +1173,11 @@ function updateTicker(txDetails) {
 // ── RENDER NETWORK HEALTH ──
 function renderHealth(blocks) {
   if (blocks.length > 0) {
-    const _b = blocks[0];
-    const _keys = Object.keys(_b).join(', ');
-    const _raw = JSON.stringify(_b).slice(0, 600);
-    const _timeProbe = 'b.time=' + _b.time + ' | b.timestamp=' + _b.timestamp + ' | b.header=' + JSON.stringify(_b.header || null).slice(0,120);
-    console.log('[CompassMem] block keys:', _keys);
-    console.log('[CompassMem] block[0]:', _raw);
-    console.log('[CompassMem] time probe:', _timeProbe);
-    // Write to on-screen debug panel
-    const _dp = document.getElementById('dp-body');
-    if (_dp) {
-      _dp.innerHTML = [
-        '<div class="dp-line highlight">BLOCK KEYS: ' + _keys + '</div>',
-        '<div class="dp-line">TIME PROBE: ' + _timeProbe + '</div>',
-        '<div class="dp-line">RAW BLOCK[0]: ' + _raw.replace(/</g,"&lt;") + '</div>',
-        '<div class="dp-line">blocks.length: ' + blocks.length + '</div>',
-      ].join('');
-    }
+
   }
 
-  // time field: Haskoin stores it as b.time OR b.header.time OR b.header.timestamp
-  // The console.log above will show which — we cover all known aliases here
-  const getTime = b => {
-    if (b.time && b.time > 1000000000) return b.time;
-    if (b.timestamp && b.timestamp > 1000000000) return b.timestamp;
-    if (b.header) {
-      if (b.header.time && b.header.time > 1000000000) return b.header.time;
-      if (b.header.timestamp && b.header.timestamp > 1000000000) return b.header.timestamp;
-    }
-    return 0;
-  };
+  // b.time is confirmed correct field from Haskoin
+  const getTime = b => (b.time || 0);
 
   let totalTime = 0, timeCount = 0;
   for (let i = 0; i < blocks.length - 1; i++) {
@@ -1253,14 +1195,8 @@ function renderHealth(blocks) {
     ? blocks.reduce((a, b) => a + getSz(b), 0) / blocks.length : 0;
   document.getElementById('h-blocksize').textContent = avgSize > 0 ? byteLabel(Math.round(avgSize)) : '—';
 
-  // tx count: Haskoin uses "txs" (integer) when notx=true
-  const getTx = b => {
-    if (typeof b.txs === 'number') return b.txs;
-    if (typeof b.txcount === 'number') return b.txcount;
-    if (typeof b._txcount === 'number') return b._txcount;
-    if (Array.isArray(b.tx)) return b.tx.length;
-    return 0;
-  };
+  // b.tx is confirmed array field from Haskoin (even with notx=true, count is present)
+  const getTx = b => Array.isArray(b.tx) ? b.tx.length : (typeof b.txs === 'number' ? b.txs : 0);
   const totalTx = blocks.reduce((a, b) => a + getTx(b), 0);
   const avgTx = blocks.length > 0 ? totalTx / blocks.length : 0;
   document.getElementById('h-txperblock').textContent = avgTx > 0 ? fmtInt(Math.round(avgTx)) : '—';
@@ -1350,14 +1286,6 @@ refresh();
 setInterval(refresh, REFRESH_MS);
 </script>
 
-<!-- DEBUG PANEL -->
-<div id="debug-panel">
-  <div class="dp-title">
-    <span>⬡ COMPASSMEM DEBUG — share this with Claude</span>
-    <span class="dp-close" onclick="document.getElementById('debug-panel').remove()">✕ CLOSE</span>
-  </div>
-  <div id="dp-body"><div class="dp-line" style="color:#4a5e4a">Waiting for data...</div></div>
-</div>
 
 </body>
 </html>
