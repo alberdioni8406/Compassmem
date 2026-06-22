@@ -1173,10 +1173,20 @@ function renderHealth(blocks) {
   if (blocks.length > 0) {
     console.log('[CompassMem] block keys:', Object.keys(blocks[0]));
     console.log('[CompassMem] block[0]:', JSON.stringify(blocks[0]).slice(0, 500));
+    console.log('[CompassMem] time probe:', blocks[0].time, blocks[0].timestamp, blocks[0].header);
   }
 
-  // time field: top-level or nested under header
-  const getTime = b => b.time || (b.header && b.header.time) || 0;
+  // time field: Haskoin stores it as b.time OR b.header.time OR b.header.timestamp
+  // The console.log above will show which — we cover all known aliases here
+  const getTime = b => {
+    if (b.time && b.time > 1000000000) return b.time;
+    if (b.timestamp && b.timestamp > 1000000000) return b.timestamp;
+    if (b.header) {
+      if (b.header.time && b.header.time > 1000000000) return b.header.time;
+      if (b.header.timestamp && b.header.timestamp > 1000000000) return b.header.timestamp;
+    }
+    return 0;
+  };
 
   let totalTime = 0, timeCount = 0;
   for (let i = 0; i < blocks.length - 1; i++) {
