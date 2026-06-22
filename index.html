@@ -976,8 +976,6 @@ async function fetchRecentBlocks(startHash, count = 6) {
   for (let i = 0; i < count; i++) {
     try {
       const b = await apiFetch(`/block/${hash}?notx=true`);
-      // Normalise tx count — Haskoin uses `txs` (integer) when notx=true
-      b._txcount = b.txcount || b.txs || (Array.isArray(b.tx) ? b.tx.length : 0);
       blocks.push(b);
       hash = b.previousblockhash || b.prev;
       if (!hash) break;
@@ -1172,21 +1170,41 @@ function updateTicker(txDetails) {
 
 // ── RENDER NETWORK HEALTH ──
 function renderHealth(blocks) {
-  if (blocks.length < 2) return;
-  // Block time: average gap between last 6 blocks
-  let totalTime = 0, count = 0;
-  for (let i = 0; i < blocks.length - 1; i++) {
-    const diff = (blocks[i].time || 0) - (blocks[i + 1].time || 0);
-    if (diff > 0) { totalTime += diff; count++; }
+  if (blocks.length > 0) {
+    console.log('[CompassMem] block keys:', Object.keys(blocks[0]));
+    console.log('[CompassMem] block[0]:', JSON.stringify(blocks[0]).slice(0, 500));
   }
-  const avgTime = count > 0 ? Math.round(totalTime / count) : null;
+
+  // time field: top-level or nested under header
+  const getTime = b => b.time || (b.header && b.header.time) || 0;
+
+  let totalTime = 0, timeCount = 0;
+  for (let i = 0; i < blocks.length - 1; i++) {
+    const t0 = getTime(blocks[i]);
+    const t1 = getTime(blocks[i + 1]);
+    const diff = t0 - t1;
+    if (diff > 0 && diff < 7200) { totalTime += diff; timeCount++; }
+  }
+  const avgTime = timeCount > 0 ? Math.round(totalTime / timeCount) : null;
   document.getElementById('h-blocktime').textContent = avgTime ? avgTime + 's' : '—';
 
-  const avgSize = blocks.reduce((a, b) => a + (b.size || 0), 0) / blocks.length;
-  document.getElementById('h-blocksize').textContent = byteLabel(Math.round(avgSize));
+  // size field
+  const getSz = b => b.size || (b.header && b.header.size) || 0;
+  const avgSize = blocks.length > 0
+    ? blocks.reduce((a, b) => a + getSz(b), 0) / blocks.length : 0;
+  document.getElementById('h-blocksize').textContent = avgSize > 0 ? byteLabel(Math.round(avgSize)) : '—';
 
-  const avgTx = blocks.reduce((a, b) => a + (b._txcount || 0), 0) / blocks.length;
-  document.getElementById('h-txperblock').textContent = fmtInt(Math.round(avgTx));
+  // tx count: Haskoin uses "txs" (integer) when notx=true
+  const getTx = b => {
+    if (typeof b.txs === 'number') return b.txs;
+    if (typeof b.txcount === 'number') return b.txcount;
+    if (typeof b._txcount === 'number') return b._txcount;
+    if (Array.isArray(b.tx)) return b.tx.length;
+    return 0;
+  };
+  const totalTx = blocks.reduce((a, b) => a + getTx(b), 0);
+  const avgTx = blocks.length > 0 ? totalTx / blocks.length : 0;
+  document.getElementById('h-txperblock').textContent = avgTx > 0 ? fmtInt(Math.round(avgTx)) : '—';
 }
 
 // ── STATUS ──
@@ -1245,7 +1263,7 @@ async function refresh() {
     renderFeeDist(txDetails);
     renderBlocks(blocks);
     renderTxFeed(txDetails);
-    renderHealth(blocks);
+    renderHealth(blocks);  // block fields normalised inside renderHealth
     if (txDetails.length > 0) updateTicker(txDetails);
 
     setStatus(true);
