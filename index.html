@@ -897,7 +897,7 @@
     <a href="https://compasspay.cash" target="_blank">CompassPay</a>
     <a href="https://stableshift.cash" target="_blank">StableShift</a>
     <a href="https://compass-whale.vercel.app" target="_blank">CompassWhale</a>
-    <a href="https://github.com/alberdioni8406/Compassmem" target="_blank">GitHub</a>
+    <a href="https://github.com/alberdioni8406/compassmem" target="_blank">GitHub</a>
   </div>
   <div class="donate-row">
     <div class="donate-label">Support</div>
@@ -970,19 +970,32 @@ async function fetchBestBlock() {
 }
 
 // ── FETCH RECENT BLOCKS ──
-// notx=true skips embedding all tx hashes → much faster response
-// Haskoin block object: { hash, height, size, txs (count), time, previousblockhash, ... }
-async function fetchRecentBlocks(startHash, count = 6) {
-  const blocks = [];
-  let hash = startHash;
-  for (let i = 0; i < count; i++) {
+// Use height-based batch: GET /blocks/{height}?count=6 returns array of blocks
+// Falls back to hash-walk if batch fails
+async function fetchRecentBlocks(bestHeight, count = 6) {
+  try {
+    // Fetch blocks by height range in one call
+    const data = await apiFetch(`/blocks/${bestHeight}?count=${count}`);
+    if (Array.isArray(data) && data.length > 1) {
+      console.log('[CompassMem] batch blocks OK, count:', data.length, 'times:', data.map(b=>b.time));
+      return data;
+    }
+  } catch(e) {
+    console.warn('[CompassMem] batch fetch failed:', e.message);
+  }
+  // Fallback: walk by hash
+  const best = await apiFetch(`/block/best?notx=true`);
+  const blocks = [best];
+  let hash = best.previous || best.previousblockhash || best.prev;
+  for (let i = 1; i < count; i++) {
+    if (!hash) break;
     try {
       const b = await apiFetch(`/block/${hash}?notx=true`);
       blocks.push(b);
-      hash = b.previousblockhash || b.prev;
-      if (!hash) break;
+      hash = b.previous || b.previousblockhash || b.prev;
     } catch(e) { break; }
   }
+  console.log('[CompassMem] fallback blocks:', blocks.length, 'times:', blocks.map(b=>b.time));
   return blocks;
 }
 
@@ -1171,24 +1184,32 @@ function updateTicker(txDetails) {
 }
 
 // ── RENDER NETWORK HEALTH ──
-function renderHealth(blocks) {
+function renderHealth(blocks, health) {
   if (!blocks.length) return;
 
-  // b.time confirmed correct. Use abs diff + wide 86400s window.
+  // ── Block Time ──
+  // Strategy 1: diff consecutive b.time values from multiple blocks
   const times = blocks.map(b => b.time || 0).filter(t => t > 1000000000);
-  let totalTime = 0, timeCount = 0;
-  for (let i = 0; i < times.length - 1; i++) {
-    const diff = Math.abs(times[i] - times[i + 1]);
-    if (diff > 0 && diff < 86400) { totalTime += diff; timeCount++; }
+  let avgTime = null;
+  if (times.length > 1) {
+    let total = 0, count = 0;
+    for (let i = 0; i < times.length - 1; i++) {
+      const diff = Math.abs(times[i] - times[i + 1]);
+      if (diff > 0 && diff < 86400) { total += diff; count++; }
+    }
+    if (count > 0) avgTime = Math.round(total / count);
   }
-  const avgTime = timeCount > 0 ? Math.round(totalTime / timeCount) : null;
+  // Strategy 2: fallback to health endpoint last-block age (single block elapsed time)
+  if (!avgTime && health && health['last-block'] && health['last-block'].age != null) {
+    avgTime = health['last-block'].age;
+  }
   document.getElementById('h-blocktime').textContent = avgTime ? avgTime + 's' : '—';
 
-  // b.size confirmed correct
+  // ── Avg Block Size ──
   const avgSize = blocks.reduce((a, b) => a + (b.size || 0), 0) / blocks.length;
   document.getElementById('h-blocksize').textContent = avgSize > 0 ? byteLabel(Math.round(avgSize)) : '—';
 
-  // b.tx confirmed array from Haskoin
+  // ── Avg Txs/Block ──
   const avgTx = blocks.reduce((a, b) => a + (Array.isArray(b.tx) ? b.tx.length : 0), 0) / blocks.length;
   document.getElementById('h-txperblock').textContent = avgTx > 0 ? fmtInt(Math.round(avgTx)) : '—';
 }
@@ -1218,15 +1239,18 @@ function setLastUpdate() {
 async function refresh() {
   document.getElementById('load-status').textContent = 'FETCHING BEST BLOCK...';
   try {
-    // 1. Best block
-    const best = await fetchBestBlock();
+    // 1. Best block + health in parallel
+    const [best, health] = await Promise.all([
+      fetchBestBlock(),
+      apiFetch('/health').catch(() => null)
+    ]);
     state.bestBlock = best;
+    console.log('[CompassMem] health:', JSON.stringify(health).slice(0, 200));
 
     document.getElementById('load-status').textContent = 'LOADING RECENT BLOCKS...';
 
-    // 2. Recent blocks — Haskoin returns hash field as "hash"
-    const startHash = best.hash || best.id;
-    const blocks = await fetchRecentBlocks(startHash, 6);
+    // 2. Recent blocks — fetch by height (batch endpoint) with hash-walk fallback
+    const blocks = await fetchRecentBlocks(best.height, 6);
     state.blocks = blocks;
 
     document.getElementById('load-status').textContent = 'SCANNING MEMPOOL...';
@@ -1249,7 +1273,7 @@ async function refresh() {
     renderFeeDist(txDetails);
     renderBlocks(blocks);
     renderTxFeed(txDetails);
-    renderHealth(blocks);  // block fields normalised inside renderHealth
+    renderHealth(blocks, health);
     if (txDetails.length > 0) updateTicker(txDetails);
 
     setStatus(true);
