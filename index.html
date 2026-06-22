@@ -1172,33 +1172,24 @@ function updateTicker(txDetails) {
 
 // ── RENDER NETWORK HEALTH ──
 function renderHealth(blocks) {
-  if (blocks.length > 0) {
+  if (!blocks.length) return;
 
-  }
-
-  // b.time is confirmed correct field from Haskoin
-  const getTime = b => (b.time || 0);
-
+  // b.time confirmed correct. Use abs diff + wide 86400s window.
+  const times = blocks.map(b => b.time || 0).filter(t => t > 1000000000);
   let totalTime = 0, timeCount = 0;
-  for (let i = 0; i < blocks.length - 1; i++) {
-    const t0 = getTime(blocks[i]);
-    const t1 = getTime(blocks[i + 1]);
-    const diff = t0 - t1;
-    if (diff > 0 && diff < 7200) { totalTime += diff; timeCount++; }
+  for (let i = 0; i < times.length - 1; i++) {
+    const diff = Math.abs(times[i] - times[i + 1]);
+    if (diff > 0 && diff < 86400) { totalTime += diff; timeCount++; }
   }
   const avgTime = timeCount > 0 ? Math.round(totalTime / timeCount) : null;
   document.getElementById('h-blocktime').textContent = avgTime ? avgTime + 's' : '—';
 
-  // size field
-  const getSz = b => b.size || (b.header && b.header.size) || 0;
-  const avgSize = blocks.length > 0
-    ? blocks.reduce((a, b) => a + getSz(b), 0) / blocks.length : 0;
+  // b.size confirmed correct
+  const avgSize = blocks.reduce((a, b) => a + (b.size || 0), 0) / blocks.length;
   document.getElementById('h-blocksize').textContent = avgSize > 0 ? byteLabel(Math.round(avgSize)) : '—';
 
-  // b.tx is confirmed array field from Haskoin (even with notx=true, count is present)
-  const getTx = b => Array.isArray(b.tx) ? b.tx.length : (typeof b.txs === 'number' ? b.txs : 0);
-  const totalTx = blocks.reduce((a, b) => a + getTx(b), 0);
-  const avgTx = blocks.length > 0 ? totalTx / blocks.length : 0;
+  // b.tx confirmed array from Haskoin
+  const avgTx = blocks.reduce((a, b) => a + (Array.isArray(b.tx) ? b.tx.length : 0), 0) / blocks.length;
   document.getElementById('h-txperblock').textContent = avgTx > 0 ? fmtInt(Math.round(avgTx)) : '—';
 }
 
