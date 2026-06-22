@@ -681,6 +681,41 @@
     .ticker-track { animation: none; }
     .pulse-dot { animation: none; }
   }
+
+  /* ── DEBUG PANEL ── */
+  #debug-panel {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: #0a0a0a;
+    border-top: 2px solid #4dff91;
+    max-height: 220px;
+    overflow-y: auto;
+    z-index: 9999;
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    padding: 8px 12px;
+  }
+  #debug-panel .dp-title {
+    color: #4dff91;
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    margin-bottom: 6px;
+    display: flex;
+    justify-content: space-between;
+  }
+  #debug-panel .dp-close {
+    color: #ff4d6a;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  #debug-panel .dp-line {
+    color: #7a9e7a;
+    border-bottom: 1px solid #1a2e1a;
+    padding: 3px 0;
+    word-break: break-all;
+  }
+  #debug-panel .dp-line.highlight { color: #4dff91; }
+
 </style>
 </head>
 <body>
@@ -1171,9 +1206,23 @@ function updateTicker(txDetails) {
 // ── RENDER NETWORK HEALTH ──
 function renderHealth(blocks) {
   if (blocks.length > 0) {
-    console.log('[CompassMem] block keys:', Object.keys(blocks[0]));
-    console.log('[CompassMem] block[0]:', JSON.stringify(blocks[0]).slice(0, 500));
-    console.log('[CompassMem] time probe:', blocks[0].time, blocks[0].timestamp, blocks[0].header);
+    const _b = blocks[0];
+    const _keys = Object.keys(_b).join(', ');
+    const _raw = JSON.stringify(_b).slice(0, 600);
+    const _timeProbe = 'b.time=' + _b.time + ' | b.timestamp=' + _b.timestamp + ' | b.header=' + JSON.stringify(_b.header || null).slice(0,120);
+    console.log('[CompassMem] block keys:', _keys);
+    console.log('[CompassMem] block[0]:', _raw);
+    console.log('[CompassMem] time probe:', _timeProbe);
+    // Write to on-screen debug panel
+    const _dp = document.getElementById('dp-body');
+    if (_dp) {
+      _dp.innerHTML = [
+        '<div class="dp-line highlight">BLOCK KEYS: ' + _keys + '</div>',
+        '<div class="dp-line">TIME PROBE: ' + _timeProbe + '</div>',
+        '<div class="dp-line">RAW BLOCK[0]: ' + _raw.replace(/</g,"&lt;") + '</div>',
+        '<div class="dp-line">blocks.length: ' + blocks.length + '</div>',
+      ].join('');
+    }
   }
 
   // time field: Haskoin stores it as b.time OR b.header.time OR b.header.timestamp
@@ -1300,5 +1349,15 @@ async function refresh() {
 refresh();
 setInterval(refresh, REFRESH_MS);
 </script>
+
+<!-- DEBUG PANEL -->
+<div id="debug-panel">
+  <div class="dp-title">
+    <span>⬡ COMPASSMEM DEBUG — share this with Claude</span>
+    <span class="dp-close" onclick="document.getElementById('debug-panel').remove()">✕ CLOSE</span>
+  </div>
+  <div id="dp-body"><div class="dp-line" style="color:#4a5e4a">Waiting for data...</div></div>
+</div>
+
 </body>
 </html>
